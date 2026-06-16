@@ -3,72 +3,61 @@ const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// १. हजुरको GrowDeck कुञ्जीहरू (Keys)
-const PLAYTIME_SECRET_KEY = "f2423d5bf68617d61e57"; 
+// १. GrowDeck ड्यासबोर्डबाट पाएको Postback Secret Key
 const POSTBACK_SECRET_KEY = "aa502ea3d1d752f7458a4625e0df43";
 
-// २. हजुरको वास्तविक Firebase Database URL (users फोल्डर भित्र बस्ने गरी सेट गरिएको)
+// २. तपाईंको वास्तविक Firebase Realtime Database URL
 const FIREBASE_DB_URL = "https://sajilokamai-72496-default-rtdb.firebaseio.com/users";
 
-// GrowDeck Playtime URL जेनेरेट गर्ने लिङ्क
-app.get('/get-wall-url', (req, res) => {
-    const userId = req.query.user_id || "guest_123";
-    const appId = req.query.app_id || "YOUR_APP_ID"; 
-
-    const randomDeviceId = Math.random().toString(36).substring(2, 15);
-    const wallUrl = `https://websdk.growdeck.io/?app-id=${appId}&secret-key=${PLAYTIME_SECRET_KEY}&external-id=${userId}&device-id=${randomDeviceId}`;
-    
-    res.json({ url: wallUrl });
-});
-
-// GrowDeck ले डेटा पठाउने मुख्य Postback URL
 app.get('/postback', async (req, res) => {
     const { user_id, reward, transaction_id, signature } = req.query;
 
+    // विवरण नपुगे रिक्वेस्ट रोक्ने
     if (!user_id || !reward || !transaction_id || !signature) {
-        return res.status(400).send("विवरण पुगेन");
+        return res.status(400).send("विवरण अपूर्ण छ");
     }
 
-    // Signature जाँच गर्ने नियम
+    // डकुमेन्ट अनुसार Signature बनाउने वास्तविक तरिका
     const template = `${POSTBACK_SECRET_KEY}.${user_id}.${Math.trunc(reward)}.${transaction_id}`;
     const expectedSignature = crypto.createHmac('sha256', POSTBACK_SECRET_KEY).update(template).digest('hex');
 
+    // सुरक्षा जाँच: सिग्नेचर मिले मात्र भित्र छिर्ने
     if (signature === expectedSignature) {
-        console.log(`सफल रिक्वेस्ट! युजर ${user_id} लाई ${reward} पोइन्ट दिनुपर्ने।`);
-        
         try {
-            // १. पहिले Firebase बाट युजरको हालको ब्यालेन्स कति छ भनेर हेर्ने
+            // क) Firebase बाट यो युजरको हालको डाटा तान्ने
             const getUserResponse = await fetch(`${FIREBASE_DB_URL}/${user_id}.json`);
             const userData = await getUserResponse.json();
             
-            let currentBalance = 0;
-            if (userData && userData.balance) {
-                currentBalance = Number(userData.balance);
+            // ख) पुराना कोइन वा ब्यालेन्स कति छ हेर्ने (एपको स्ट्रक्चर जे भए पनि नबिग्रियोस्)
+            let currentCoins = 0;
+            if (userData) {
+                currentCoins = Number(userData.coins || userData.balance || 0);
             }
 
-            // २. पुरानो ब्यालेन्समा GrowDeck ले दिएको नयाँ पुरस्कार (Reward) थप्ने
-            const newBalance = currentBalance + Number(reward);
+            // ग) पुरानो कोइनमा GrowDeck को नयाँ रिवार्ड थप्ने
+            const newCoins = currentCoins + Number(reward);
 
-            // ३. नयाँ ब्यालेन्सलाई Firebase Database मा सेभ (Update) गरिदिने
+            // घ) Firebase मा पुराना डाटाहरू (नाम, इमेल, आदि) नबिगारीकन कोइन मात्र अपडेट गर्ने (PATCH)
             await fetch(`${FIREBASE_DB_URL}/${user_id}.json`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ balance: newBalance })
+                body: JSON.stringify({ 
+                    coins: newCoins,   // एपले coins खोजे पनि भेट्छ
+                    balance: newCoins  // एपले balance खोजे पनि भेट्छ
+                })
             });
 
-            console.log(`Firebase मा युजर ${user_id} को नयाँ ब्यालेन्स ${newBalance} अपडेट भयो।`);
+            console.log(`सफलतापूर्वक युजर ${user_id} को नयाँ ब्यालेन्स ${newCoins} अपडेट भयो।`);
             return res.status(200).send("OK");
 
         } catch (error) {
-            console.error("Firebase मा डेटा राख्दा समस्या आयो:", error);
+            console.error("Firebase Database Error:", error);
             return res.status(500).send("Database Error");
         }
     } else {
-        console.log("अवैध सिग्नेचर!");
-        return res.status(403).send("नक्कली रिक्वेस्ट");
+        console.log("सुरक्षा जाँच असफल: अवैध सिग्नेचर!");
+        return res.status(403).send("अवैध रिक्वेस्ट");
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`सर्भर पोर्ट ${PORT} मा चलिरहेको छ।`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
