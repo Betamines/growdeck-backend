@@ -1,6 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
-const fetch = require('node-fetch'); // जरुरी छ
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -9,9 +9,9 @@ const FIREBASE_DB_URL = "https://sajilokamai-72496-default-rtdb.firebaseio.com";
 const SECRET_KEY = "aa502ea3d1d752f7458a4625e0df43";
 
 const ONESIGNAL_APP_ID = "ab2b8bde-4b9c-4d7b-a4ee-4e2f282726b4";
-const ONESIGNAL_REST_API_KEY = "os_v2_app_xxxxxxxxxxxxxxxxx"; // 🔁 आफ्नो सही key राख
+const ONESIGNAL_REST_API_KEY = "os_v2_app_vmvyxxsltrgxxjhojyxsqjzgwtfcztm2mqauel5k7otmjk3mnz6a3tuvs4vhpctpw2cbqwliwhvvrfuld6kgtrxdovogww3mpzoprma";
 
-// 🚀 ROUTE
+// 🚀 POSTBACK ROUTE
 app.get('/postback', async (req, res) => {
     const { 
         user_id, 
@@ -22,7 +22,6 @@ app.get('/postback', async (req, res) => {
         task_name
     } = req.query;
 
-    // 🔴 VALIDATION
     if (!user_id || !reward || !transaction_id || !signature) {
         return res.status(400).send("Missing data");
     }
@@ -59,7 +58,7 @@ app.get('/postback', async (req, res) => {
             })
         });
 
-        // 🔹 HISTORY SAVE
+        // 🔹 SAVE HISTORY
         const finalOfferName = offer_name || "Offerwall Game";
 
         const history = {
@@ -77,7 +76,7 @@ app.get('/postback', async (req, res) => {
             body: JSON.stringify(history)
         });
 
-        // 🔔 🔥 SEND ONESIGNAL NOTIFICATION (BEST METHOD)
+        // 🔔 SEND ONESIGNAL NOTIFICATION (external_user_id)
         const pushData = {
             app_id: ONESIGNAL_APP_ID,
             include_external_user_ids: [user_id],
@@ -100,7 +99,7 @@ app.get('/postback', async (req, res) => {
             });
 
             const result = await response.json();
-            console.log("✅ OneSignal Response:", result);
+            console.log("✅ OneSignal:", result);
 
         } catch (err) {
             console.error("❌ Push Error:", err);
