@@ -2,47 +2,89 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// तपाईंको वास्तविक Firebase Realtime Database URL
-const FIREBASE_DB_URL = "https://sajilokamai-72496-default-rtdb.firebaseio.com/users";
+const FIREBASE_DB_URL = "https://sajilokamai-72496-default-rtdb.firebaseio.com";
 
 app.get('/postback', async (req, res) => {
-    // वेब लिङ्कबाट आउने user_id र reward मात्र लिने
-    const { user_id, reward } = req.query;
+
+    const { 
+        user_id, 
+        reward, 
+        offer_name, 
+        offer_id, 
+        task_name, 
+        task_id,
+        event_id 
+    } = req.query;
 
     if (!user_id || !reward) {
-        return res.status(400).send("विवरण अपूर्ण छ");
+        return res.status(400).send("Missing data");
     }
 
     try {
-        // क) Firebase बाट यो युजरको हालको डाटा तान्ने
-        const getUserResponse = await fetch(`${FIREBASE_DB_URL}/${user_id}.json`);
-        const userData = await getUserResponse.json();
-        
+        // 🔹 Duplicate check (same event दोहोरिन नदिन)
+        if (event_id) {
+            const checkEvent = await fetch(`${FIREBASE_DB_URL}/events/${event_id}.json`);
+            const eventExists = await checkEvent.json();
+
+            if (eventExists) {
+                console.log("Duplicate event ignored");
+                return res.status(200).send("Duplicate");
+            }
+        }
+
+        // 🔹 User data fetch
+        const userRes = await fetch(`${FIREBASE_DB_URL}/users/${user_id}.json`);
+        const userData = await userRes.json();
+
         let currentCoins = 0;
         if (userData) {
-            // एपले 'coins' वा 'balance' जुन प्रयोग गरे पनि डेटा तान्ने
             currentCoins = Number(userData.coins || userData.balance || 0);
         }
 
-        // ख) पुरानो कोइनमा नयाँ रिवार्ड थप्ने
         const newCoins = currentCoins + Number(reward);
 
-        // ग) Firebase मा 'coins' र 'balance' दुवै ठाउँमा अपडेट गरिदिने (PATCH)
-        await fetch(`${FIREBASE_DB_URL}/${user_id}.json`, {
+        // 🔹 Update coins
+        await fetch(`${FIREBASE_DB_URL}/users/${user_id}.json`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 coins: newCoins,
                 balance: newCoins
             })
         });
 
-        console.log(`सफलतापूर्वक युजर ${user_id} को नयाँ ब्यालेन्स ${newCoins} भयो।`);
+        // 🔥 🔹 HISTORY SAVE (IMPORTANT)
+        const historyData = {
+            user_id,
+            coins: Number(reward),
+            offer_name: offer_name || "Unknown Game",
+            task_name: task_name || "Task",
+            offer_id: offer_id || null,
+            task_id: task_id || null,
+            timestamp: Date.now()
+        };
+
+        await fetch(`${FIREBASE_DB_URL}/history/${user_id}.json`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(historyData)
+        });
+
+        // 🔹 Save event_id (duplicate रोक्न)
+        if (event_id) {
+            await fetch(`${FIREBASE_DB_URL}/events/${event_id}.json`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ used: true })
+            });
+        }
+
+        console.log(`User ${user_id} earned ${reward} from ${offer_name}`);
         return res.status(200).send("OK");
 
     } catch (error) {
-        console.error("Firebase Error:", error);
-        return res.status(500).send("Database Error");
+        console.error("Error:", error);
+        return res.status(500).send("Server Error");
     }
 });
 
