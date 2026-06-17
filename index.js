@@ -1,14 +1,17 @@
 const express = require('express');
 const crypto = require('crypto');
+const fetch = require('node-fetch'); // जरुरी छ
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 👉 Firebase र OneSignal को सेटिङ
+// 🔥 CONFIG
 const FIREBASE_DB_URL = "https://sajilokamai-72496-default-rtdb.firebaseio.com";
-const SECRET_KEY = "aa502ea3d1d752f7458a4625e0df43"; // 👉 आफ्नो Postback key हाल
-const ONESIGNAL_APP_ID = "ab2b8bde-4b9c-4d7b-a4ee-4e2f282726b4"; // 👉 यहाँ OneSignal App ID राख्नुहोस्
-const ONESIGNAL_REST_API_KEY = "os_v2_app_vmvyxxsltrgxxjhojyxsqjzgwtfcztm2mqauel5k7otmjk3mnz6a3tuvs4vhpctpw2cbqwliwhvvrfuld6kgtrxdovogww3mpzoprma"; // 👉 यहाँ OneSignal API Key राख्नुहोस्
+const SECRET_KEY = "aa502ea3d1d752f7458a4625e0df43";
 
+const ONESIGNAL_APP_ID = "ab2b8bde-4b9c-4d7b-a4ee-4e2f282726b4";
+const ONESIGNAL_REST_API_KEY = "os_v2_app_xxxxxxxxxxxxxxxxx"; // 🔁 आफ्नो सही key राख
+
+// 🚀 ROUTE
 app.get('/postback', async (req, res) => {
     const { 
         user_id, 
@@ -19,12 +22,15 @@ app.get('/postback', async (req, res) => {
         task_name
     } = req.query;
 
+    // 🔴 VALIDATION
     if (!user_id || !reward || !transaction_id || !signature) {
         return res.status(400).send("Missing data");
     }
 
     try {
         const rewardInt = Math.trunc(Number(reward));
+
+        // 🔐 SIGNATURE VERIFY
         const dataString = `${SECRET_KEY}.${user_id}.${rewardInt}.${transaction_id}`;
 
         const expectedSignature = crypto
@@ -36,15 +42,14 @@ app.get('/postback', async (req, res) => {
             return res.status(403).send("Invalid signature");
         }
 
-        // 🔹 Get User Email for notification
+        // 🔹 GET USER DATA
         const userRes = await fetch(`${FIREBASE_DB_URL}/users/${user_id}.json`);
         const userData = await userRes.json();
-        const userEmail = userData?.email;
 
         let currentCoins = Number(userData?.coins || userData?.balance || 0);
         const newCoins = currentCoins + Number(reward);
 
-        // 🔹 Update coins
+        // 🔹 UPDATE COINS
         await fetch(`${FIREBASE_DB_URL}/users/${user_id}.json`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -54,13 +59,13 @@ app.get('/postback', async (req, res) => {
             })
         });
 
-        // 🔥 History save (यहाँ डेटाबेसमा हिस्ट्री मात्र बस्छ, notification बस्दैन)
-        const finalOfferName = offer_name ? offer_name : "Offerwall Game";
+        // 🔹 HISTORY SAVE
+        const finalOfferName = offer_name || "Offerwall Game";
+
         const history = {
             userId: user_id,
-            userEmail: userEmail || "From Server",
             amount: Number(reward),
-            offer_name: finalOfferName, // अब असली नाम जानेछ
+            offer_name: finalOfferName,
             task_name: task_name || "Task",
             transaction_id,
             timestamp: Date.now()
@@ -72,37 +77,45 @@ app.get('/postback', async (req, res) => {
             body: JSON.stringify(history)
         });
 
-        // 🔥 Send OneSignal Notification Direct to User
-        if (userEmail) {
-            const pushData = {
-                app_id: ONESIGNAL_APP_ID,
-                target_channel: "push",
-                filters: [
-                    {"field": "tag", "key": "email", "relation": "=", "value": userEmail}
-                ],
-                headings: {"en": "Offerwall Completed! 🎉"},
-                contents: {"en": `तपाईंले ${finalOfferName} बाट ${reward} Coins कमाउनुभयो। खातेमा जम्मा भइसक्यो!`},
-            };
+        // 🔔 🔥 SEND ONESIGNAL NOTIFICATION (BEST METHOD)
+        const pushData = {
+            app_id: ONESIGNAL_APP_ID,
+            include_external_user_ids: [user_id],
+            headings: {
+                en: "Offerwall Completed! 🎉"
+            },
+            contents: {
+                en: `तपाईंले ${finalOfferName} बाट ${reward} Coins कमाउनुभयो। खातेमा जम्मा भइसक्यो!`
+            }
+        };
 
-            await fetch("https://onesignal.com/api/v1/notifications", {
+        try {
+            const response = await fetch("https://onesignal.com/api/v1/notifications", {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Basic ${ONESIGNAL_REST_API_KEY}`
                 },
                 body: JSON.stringify(pushData)
-            }).then(resp => resp.json())
-              .then(data => console.log("Push Result:", data))
-              .catch(err => console.error("Push Error:", err));
+            });
+
+            const result = await response.json();
+            console.log("✅ OneSignal Response:", result);
+
+        } catch (err) {
+            console.error("❌ Push Error:", err);
         }
 
-        console.log(`User ${user_id} earned ${reward}`);
+        console.log(`✅ User ${user_id} earned ${reward}`);
         return res.status(200).send("OK");
 
     } catch (error) {
-        console.error(error);
+        console.error("❌ Server Error:", error);
         return res.status(500).send("Server Error");
     }
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// 🚀 START SERVER
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+});
