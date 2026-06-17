@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const FIREBASE_DB_URL = "https://sajilokamai-72496-default-rtdb.firebaseio.com";
-const SECRET_KEY = "aa502ea3d1d752f7458a4625e0df43"; // 👉 आफ्नो key हाल
+const SECRET_KEY = "aa502ea3d1d752f7458a4625e0df43";
 
 app.get('/postback', async (req, res) => {
 
@@ -68,6 +68,29 @@ app.get('/postback', async (req, res) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(history)
         });
+
+        // 🔥 🔔 Notification Push Logic
+        const notifRef = await fetch(`${FIREBASE_DB_URL}/notifications.json`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: "Offerwall Reward 🎁",
+                message: `You earned ${reward} coins completing ${offer_name || 'Game'}.`,
+                email: userData?.email || "ALL",
+                image: "",
+                timestamp: Date.now()
+            })
+        });
+
+        const notifData = await notifRef.json();
+
+        if (notifData && notifData.name) {
+            await fetch(`${FIREBASE_DB_URL}/notifications/${notifData.name}.json`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: notifData.name })
+            });
+        }
 
         console.log(`User ${user_id} earned ${reward}`);
         return res.status(200).send("OK");
